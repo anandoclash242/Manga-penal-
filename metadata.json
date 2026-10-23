@@ -1,0 +1,6 @@
+{
+  "name": "Manga Layer Studio AI",
+  "description": "AI-powered manga & anime character part separator and professional layer editor with genuine transparent PNG exports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
