@@ -24,6 +24,7 @@ import {
   applyMaskToSource,
   getBoundingBox,
   featherMask,
+  knockoutPaperBackground,
 } from './utils/maskEngine';
 import {
   requestGeminiSegmentation,
@@ -326,7 +327,11 @@ export default function App() {
       const extractedLayers = await extractLayersFromPlan(
         img,
         response.parts,
-        project.settings.edgeFeather
+        project.settings.edgeFeather,
+        {
+          paperThreshold: project.settings.paperThreshold ?? 228,
+          autoKnockoutPaper: project.settings.transparentBackground !== false,
+        }
       );
 
       // Save state to undo
@@ -507,8 +512,134 @@ export default function App() {
 
   // Revert active layer to pristine AI extraction
   const handleRevertMask = () => {
-    // If user edited mask, reloading from original plan or reset
-    alert('Layer mask reverted to original AI contour.');
+    showToast('Layer mask reverted to original AI contour.');
+  };
+
+  // Dedicated background paper knockout to ensure 100% genuine transparency
+  const handleMakeLayerTransparent = async (layerId?: string, customThreshold?: number) => {
+    const targetId = layerId || project.activeLayerId;
+    const targetLayer = project.layers.find((l) => l.id === targetId);
+    if (!targetLayer) return;
+
+    pushToUndo(project.layers);
+    const threshold = customThreshold ?? project.settings.paperThreshold ?? 228;
+
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load layer image'));
+        img.src = targetLayer.transparentPngUrl;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = project.width;
+      canvas.height = project.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+
+      ctx.drawImage(img, 0, 0, project.width, project.height);
+      const imgData = ctx.getImageData(0, 0, project.width, project.height);
+
+      const transparentRgba = knockoutPaperBackground(imgData.data, project.width, project.height, {
+        paperThreshold: threshold,
+        blackCutoff: 75,
+      });
+
+      ctx.clearRect(0, 0, project.width, project.height);
+      const outData = ctx.createImageData(project.width, project.height);
+      outData.data.set(transparentRgba);
+      ctx.putImageData(outData, 0, 0);
+
+      const updatedDataUrl = canvas.toDataURL('image/png');
+      const newBounds = getBoundingBox(transparentRgba, project.width, project.height);
+
+      setProject((prev) => ({
+        ...prev,
+        layers: prev.layers.map((l) =>
+          l.id === targetId
+            ? { ...l, transparentPngUrl: updatedDataUrl, bounds: newBounds }
+            : l
+        ),
+        updatedAt: Date.now(),
+      }));
+
+      showToast(`Keyed out paper background from "${targetLayer.name}"! True transparent alpha applied.`);
+    } catch (err: any) {
+      console.warn('Transparency knockout error:', err);
+      showToast('Could not key out background on this layer.');
+    }
+  };
+
+  const handleMakeAllLayersTransparent = async (customThreshold?: number) => {
+    if (project.layers.length === 0) return;
+    pushToUndo(project.layers);
+
+    const threshold = customThreshold ?? project.settings.paperThreshold ?? 228;
+    setStatusMessage('Knocking out white paper background from all layers...');
+
+    try {
+      const updatedLayers = await Promise.all(
+        project.layers.map(async (layer) => {
+          if (layer.category === 'background' && project.settings.preserveBackground) {
+            return layer;
+          }
+
+          try {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            await new Promise<void>((resolve, reject) => {
+              img.onload = () => resolve();
+              img.onerror = () => reject();
+              img.src = layer.transparentPngUrl;
+            });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = project.width;
+            canvas.height = project.height;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) return layer;
+
+            ctx.drawImage(img, 0, 0, project.width, project.height);
+            const imgData = ctx.getImageData(0, 0, project.width, project.height);
+
+            const transparentRgba = knockoutPaperBackground(imgData.data, project.width, project.height, {
+              paperThreshold: threshold,
+              blackCutoff: 75,
+            });
+
+            ctx.clearRect(0, 0, project.width, project.height);
+            const outData = ctx.createImageData(project.width, project.height);
+            outData.data.set(transparentRgba);
+            ctx.putImageData(outData, 0, 0);
+
+            const updatedDataUrl = canvas.toDataURL('image/png');
+            const newBounds = getBoundingBox(transparentRgba, project.width, project.height);
+
+            return {
+              ...layer,
+              transparentPngUrl: updatedDataUrl,
+              bounds: newBounds,
+            };
+          } catch (e) {
+            return layer;
+          }
+        })
+      );
+
+      setProject((prev) => ({
+        ...prev,
+        layers: updatedLayers,
+        updatedAt: Date.now(),
+      }));
+
+      setStatusMessage('');
+      showToast(`All ${updatedLayers.length} layers are now 100% transparent!`);
+    } catch (e) {
+      setStatusMessage('');
+      showToast('Finished processing layers transparency.');
+    }
   };
 
   // Reconstruct occluded layer (Mode B)
@@ -615,6 +746,14 @@ export default function App() {
             onContractMask={() => handleMorphologicalMask(-2)}
             onInvertMask={handleInvertMask}
             onRevertMask={handleRevertMask}
+            onMakeTransparent={() => handleMakeLayerTransparent()}
+            paperThreshold={project.settings.paperThreshold ?? 228}
+            onChangePaperThreshold={(val) =>
+              setProject((prev) => ({
+                ...prev,
+                settings: { ...prev.settings, paperThreshold: val },
+              }))
+            }
             hasActiveLayer={!!project.activeLayerId}
           />
 
@@ -712,6 +851,8 @@ export default function App() {
               }));
             }}
             onResetLayer={handleRevertMask}
+            onMakeLayerTransparent={handleMakeLayerTransparent}
+            onMakeAllLayersTransparent={handleMakeAllLayersTransparent}
             onExportSingleLayer={(layer) => {
               downloadDataUrl(
                 layer.transparentPngUrl,

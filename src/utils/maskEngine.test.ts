@@ -9,6 +9,8 @@ import {
   getBoundingBox,
   featherMask,
   refineLayerAlpha,
+  isMangaPaperPixel,
+  knockoutPaperBackground,
 } from './maskEngine';
 
 test('applyMaskToSource creates true transparent pixels outside mask and preserves original pixels inside', () => {
@@ -163,3 +165,55 @@ test('refineLayerAlpha preserves dark ink line art at full opacity and creates t
   assert.equal(result[0], 0);
   assert.equal(result[3], 0);
 });
+
+test('isMangaPaperPixel correctly detects white and off-white paper while preserving color and ink', () => {
+  // Pure white paper
+  assert.equal(isMangaPaperPixel(255, 255, 255), true);
+  // Off-white / cream manga paper
+  assert.equal(isMangaPaperPixel(248, 245, 238), true);
+  // Light scan newsprint
+  assert.equal(isMangaPaperPixel(235, 235, 235), true);
+  // Dark ink stroke (should NOT be paper)
+  assert.equal(isMangaPaperPixel(20, 20, 20), false);
+  // Colored skin tone (should NOT be paper due to color saturation)
+  assert.equal(isMangaPaperPixel(254, 215, 170), false);
+  // Vibrant yellow/red/blue clothing (should NOT be paper)
+  assert.equal(isMangaPaperPixel(230, 50, 50), false);
+});
+
+test('knockoutPaperBackground eliminates white paper surrounding character and preserves ink', () => {
+  const width = 6;
+  const height = 6;
+  const total = width * height;
+  const buffer = new Uint8ClampedArray(total * 4);
+
+  // Fill with white manga paper (255, 255, 255, 255)
+  for (let i = 0; i < total; i++) {
+    buffer[i * 4] = 255;
+    buffer[i * 4 + 1] = 255;
+    buffer[i * 4 + 2] = 255;
+    buffer[i * 4 + 3] = 255;
+  }
+
+  // Draw a black ink character stroke at (2, 2) and (3, 2)
+  const ink1 = (2 * width + 2) * 4;
+  buffer[ink1] = 10;
+  buffer[ink1 + 1] = 10;
+  buffer[ink1 + 2] = 10;
+
+  const ink2 = (2 * width + 3) * 4;
+  buffer[ink2] = 10;
+  buffer[ink2 + 1] = 10;
+  buffer[ink2 + 2] = 10;
+
+  const transparentOutput = knockoutPaperBackground(buffer, width, height, { paperThreshold: 228 });
+
+  // Boundary white paper must now have alpha = 0 (completely transparent)
+  assert.equal(transparentOutput[3], 0, 'Top-left corner must be transparent');
+  assert.equal(transparentOutput[(width - 1) * 4 + 3], 0, 'Top-right corner must be transparent');
+
+  // Character ink lines must remain 100% opaque
+  assert.equal(transparentOutput[ink1 + 3], 255, 'Ink stroke pixel 1 must remain fully opaque');
+  assert.equal(transparentOutput[ink2 + 3], 255, 'Ink stroke pixel 2 must remain fully opaque');
+});
+

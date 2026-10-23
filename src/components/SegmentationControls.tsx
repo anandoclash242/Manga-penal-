@@ -362,25 +362,52 @@ export const SegmentationControls: React.FC<SegmentationControlsProps> = ({
         {/* Core Toggles: Transparency & Reconstruction */}
         <div className="space-y-2.5 pt-2 border-t border-slate-800/80">
           {/* Transparent Background Toggle */}
-          <label className="flex items-start gap-2.5 p-2 rounded-lg bg-blue-950/20 border border-blue-900/30 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.transparentBackground}
-              onChange={(e) =>
-                onUpdateSettings({ ...settings, transparentBackground: e.target.checked })
-              }
-              className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
-            />
-            <div>
-              <span className="text-xs font-medium text-blue-300 flex items-center gap-1">
-                <span>Genuine Transparent Background</span>
-                <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-              </span>
-              <p className="text-[10px] text-slate-400 leading-tight mt-0.5">
-                Every extracted part exports as a 32-bit RGBA PNG with real alpha channel.
-              </p>
-            </div>
-          </label>
+          <div className="p-2.5 rounded-lg bg-blue-950/20 border border-blue-900/30 space-y-2">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.transparentBackground}
+                onChange={(e) =>
+                  onUpdateSettings({ ...settings, transparentBackground: e.target.checked })
+                }
+                className="mt-0.5 rounded border-slate-700 text-blue-600 focus:ring-0"
+              />
+              <div>
+                <span className="text-xs font-medium text-blue-300 flex items-center gap-1">
+                  <span>Genuine Transparent Background (Knock Out Paper)</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                </span>
+                <p className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                  Automatically eliminates white/off-white background paper and exports genuine 32-bit RGBA PNGs with true zero alpha.
+                </p>
+              </div>
+            </label>
+
+            {settings.transparentBackground && (
+              <div className="pt-1.5 pl-6 border-t border-blue-900/20 space-y-1">
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-slate-300">Paper Knockout Cutoff</span>
+                  <span className="font-mono text-emerald-400">
+                    {settings.paperThreshold ?? 228}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="180"
+                  max="250"
+                  step="2"
+                  value={settings.paperThreshold ?? 228}
+                  onChange={(e) =>
+                    onUpdateSettings({ ...settings, paperThreshold: Number(e.target.value) })
+                  }
+                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
+                <p className="text-[9px] text-slate-500">
+                  Values 220–240 remove white/cream manga paper while preserving all dark ink line art and shading.
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* Preserve Original Background */}
           <label className="flex items-start gap-2.5 p-2 rounded-lg bg-slate-900/60 border border-slate-800/80 cursor-pointer">

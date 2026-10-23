@@ -180,6 +180,8 @@ export const SAMPLE_PROJECTS: Project[] = [
       enableReconstruction: false,
       edgeFeather: 1,
       maskQuality: 'high',
+      paperThreshold: 228,
+      autoKnockoutPaper: true,
     },
     activeLayerId: 'layer-hair-1',
     layers: [

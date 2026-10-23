@@ -22,6 +22,9 @@ interface MaskRefineToolbarProps {
   onContractMask: () => void;
   onInvertMask: () => void;
   onRevertMask: () => void;
+  onMakeTransparent?: () => void;
+  paperThreshold?: number;
+  onChangePaperThreshold?: (val: number) => void;
   hasActiveLayer: boolean;
 }
 
@@ -34,6 +37,9 @@ export const MaskRefineToolbar: React.FC<MaskRefineToolbarProps> = ({
   onContractMask,
   onInvertMask,
   onRevertMask,
+  onMakeTransparent,
+  paperThreshold = 228,
+  onChangePaperThreshold,
   hasActiveLayer,
 }) => {
   return (
@@ -111,6 +117,38 @@ export const MaskRefineToolbar: React.FC<MaskRefineToolbarProps> = ({
           <span className="text-[10px] font-mono text-blue-400 w-6">
             {brushConfig.size}px
           </span>
+        </div>
+      )}
+
+      {/* Primary Transparency Knockout Action */}
+      {onMakeTransparent && (
+        <div className="flex items-center gap-1.5 px-1 pr-2 border-r border-slate-800">
+          <button
+            onClick={onMakeTransparent}
+            disabled={!hasActiveLayer}
+            className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-30 disabled:pointer-events-none shadow-sm"
+            title="Knock out white paper & make transparent alpha (Key Out Background)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">Make Transparent</span>
+          </button>
+
+          {onChangePaperThreshold && hasActiveLayer && (
+            <div className="hidden lg:flex items-center gap-1.5 pl-1">
+              <span className="text-[9px] text-slate-400">Paper Cutoff</span>
+              <input
+                type="range"
+                min="180"
+                max="250"
+                step="2"
+                value={paperThreshold}
+                onChange={(e) => onChangePaperThreshold(Number(e.target.value))}
+                className="w-16 h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-emerald-500"
+                title={`Paper cutoff sensitivity: ${paperThreshold}`}
+              />
+              <span className="text-[9px] font-mono text-emerald-400">{paperThreshold}</span>
+            </div>
+          )}
         </div>
       )}
 

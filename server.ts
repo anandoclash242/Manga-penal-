@@ -140,9 +140,15 @@ Specific Inclusions: ${includeParts.length > 0 ? includeParts.join(', ') : 'None
 Specific Exclusions: ${excludeParts.length > 0 ? excludeParts.join(', ') : 'None'}.
 Preserve Background: ${preserveBackground ? 'Yes' : 'No'}.
 
+TRANSPARENCY & BACKGROUND ELIMINATION RULES (CRITICAL):
+- All character and object layers MUST be genuinely isolated with 100% transparent backgrounds.
+- Manga, anime, and comic illustrations have white paper, cream, or screentone backdrops.
+- For all foreground parts (hair, face, clothing, body, hands, weapons, props): tightly trace ONLY the inked character strokes and anatomical shapes. NEVER include loose rectangular boxes or white paper background triangles around the character!
+- When separating, ensure the background is completely separated from character parts so exported PNGs are transparent.
+
 Coordinate Specifications:
 - box2d: [ymin, xmin, ymax, xmax] normalized integers in range 0..1000.
-- polygon: Array of [x, y] coordinates in 0..1000 space defining the precise boundary contour of each part (generate smooth, multi-point polygons with 12 to 30 points that closely trace the actual silhouettes).
+- polygon: Array of [x, y] coordinates in 0..1000 space defining the precise boundary contour of each part (generate smooth, multi-point polygons with 14 to 36 points that closely and tightly trace the actual silhouette boundaries).
 - Order parts logically from bottom to top (z-index order: background first, then body base, inner clothing, outer clothing, face skin, mouth, eyes, front hair bangs, front accessories/weapons).`;
 
     // 45-second timeout to allow the deep vision model ample time to segment complex illustrations

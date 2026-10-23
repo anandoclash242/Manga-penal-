@@ -82,57 +82,152 @@ export function applyMaskToSource(
 }
 
 /**
- * Refines a character layer's alpha channel to eliminate background paper bleed,
- * white halos, and hard jagged boundaries.
- *
- * For character elements (hair, face, eyes, body, clothing, props):
- * 1. Preserves dark line art (ink lines where luminance < 75) at 100% opacity.
- * 2. Attenuates near-white/backdrop pixels near mask edges.
- * 3. Smooths boundary transitions with antialiased feathering.
+ * Checks whether an RGB pixel matches light manga paper (white, off-white, cream, or light scan gray).
  */
-export function refineLayerAlpha(
-  source: Uint8ClampedArray | Uint8Array,
-  mask: Uint8ClampedArray | Uint8Array,
+export function isMangaPaperPixel(
+  r: number,
+  g: number,
+  b: number,
+  threshold: number = 228
+): boolean {
+  const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+  if (luma < threshold) return false;
+  // Check if it's neutral/paper-like (low saturation)
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const saturation = max === 0 ? 0 : (max - min) / max;
+  return saturation < 0.18; // Paper is neutral white/cream/gray
+}
+
+export interface PaperKnockoutOptions {
+  paperThreshold?: number; // Cutoff for paper background (default 228)
+  blackCutoff?: number; // Preserves dark ink strokes at 100% opacity (default 75)
+  aggressiveWhiteKey?: boolean;
+}
+
+/**
+ * Knocks out paper/white background from an RGBA buffer to produce true transparent alpha.
+ * Uses perimeter flood-fill to eliminate exterior paper patches, followed by intelligent
+ * color-to-alpha for manga line art antialiasing.
+ */
+export function knockoutPaperBackground(
+  rgbaBuffer: Uint8ClampedArray | Uint8Array,
   width: number,
   height: number,
-  category: string,
-  featherRadius: number = 1
+  options: PaperKnockoutOptions = {}
 ): Uint8ClampedArray {
-  if (category === 'background') {
-    return applyMaskToSource(source, mask, width, height, 0);
-  }
+  const threshold = options.paperThreshold ?? 228;
+  const blackCutoff = options.blackCutoff ?? 75;
+  const output = new Uint8ClampedArray(rgbaBuffer);
+  const total = width * height;
 
-  const output = new Uint8ClampedArray(source.length);
-  const totalPixels = width * height;
+  // 1. Flood-fill from borders and transparent boundaries to knock out exterior connected background
+  const visited = new Uint8Array(total);
+  const queue: number[] = [];
 
-  // Detect estimated background luminance by sampling corners
-  let cornerLumaSum = 0;
-  let cornerCount = 0;
-  const samplePoints = [
-    0, // top-left
-    Math.min(width - 1, 10), // near top-left
-    Math.max(0, width - 1), // top-right
-    (height - 1) * width, // bottom-left
-    (height - 1) * width + Math.max(0, width - 1), // bottom-right
-  ];
-  for (const p of samplePoints) {
-    if (p >= 0 && p < totalPixels) {
-      const idx = p * 4;
-      const luma = 0.299 * source[idx] + 0.587 * source[idx + 1] + 0.114 * source[idx + 2];
-      cornerLumaSum += luma;
-      cornerCount++;
+  // Seed boundary pixels that are paper-like
+  for (let x = 0; x < width; x++) {
+    // Top border
+    const topIdx = x;
+    if (
+      rgbaBuffer[topIdx * 4 + 3] > 0 &&
+      isMangaPaperPixel(rgbaBuffer[topIdx * 4], rgbaBuffer[topIdx * 4 + 1], rgbaBuffer[topIdx * 4 + 2], threshold - 20)
+    ) {
+      queue.push(topIdx);
+      visited[topIdx] = 1;
+    }
+    // Bottom border
+    const btmIdx = (height - 1) * width + x;
+    if (
+      rgbaBuffer[btmIdx * 4 + 3] > 0 &&
+      isMangaPaperPixel(rgbaBuffer[btmIdx * 4], rgbaBuffer[btmIdx * 4 + 1], rgbaBuffer[btmIdx * 4 + 2], threshold - 20)
+    ) {
+      queue.push(btmIdx);
+      visited[btmIdx] = 1;
     }
   }
-  const isLightBackground = cornerCount > 0 && cornerLumaSum / cornerCount > 200;
 
-  // Smooth mask with feathering
-  const smoothMask = featherRadius > 0 ? featherMask(mask, width, height, featherRadius) : mask;
+  for (let y = 0; y < height; y++) {
+    // Left border
+    const leftIdx = y * width;
+    if (
+      visited[leftIdx] === 0 &&
+      rgbaBuffer[leftIdx * 4 + 3] > 0 &&
+      isMangaPaperPixel(rgbaBuffer[leftIdx * 4], rgbaBuffer[leftIdx * 4 + 1], rgbaBuffer[leftIdx * 4 + 2], threshold - 20)
+    ) {
+      queue.push(leftIdx);
+      visited[leftIdx] = 1;
+    }
+    // Right border
+    const rightIdx = y * width + (width - 1);
+    if (
+      visited[rightIdx] === 0 &&
+      rgbaBuffer[rightIdx * 4 + 3] > 0 &&
+      isMangaPaperPixel(rgbaBuffer[rightIdx * 4], rgbaBuffer[rightIdx * 4 + 1], rgbaBuffer[rightIdx * 4 + 2], threshold - 20)
+    ) {
+      queue.push(rightIdx);
+      visited[rightIdx] = 1;
+    }
+  }
 
-  for (let i = 0; i < totalPixels; i++) {
+  // Also seed any pixel adjacent to an already transparent pixel (alpha == 0) that is paper-like
+  for (let i = 0; i < total; i++) {
+    if (visited[i] === 1) continue;
+    if (rgbaBuffer[i * 4 + 3] === 0) continue;
+
+    const x = i % width;
+    const y = Math.floor(i / width);
+    let hasTransparentNeighbor = false;
+    if (x > 0 && rgbaBuffer[(i - 1) * 4 + 3] === 0) hasTransparentNeighbor = true;
+    else if (x < width - 1 && rgbaBuffer[(i + 1) * 4 + 3] === 0) hasTransparentNeighbor = true;
+    else if (y > 0 && rgbaBuffer[(i - width) * 4 + 3] === 0) hasTransparentNeighbor = true;
+    else if (y < height - 1 && rgbaBuffer[(i + width) * 4 + 3] === 0) hasTransparentNeighbor = true;
+
+    if (
+      hasTransparentNeighbor &&
+      isMangaPaperPixel(rgbaBuffer[i * 4], rgbaBuffer[i * 4 + 1], rgbaBuffer[i * 4 + 2], threshold - 20)
+    ) {
+      queue.push(i);
+      visited[i] = 1;
+    }
+  }
+
+  // Run BFS flood fill
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    const cx = cur % width;
+    const cy = Math.floor(cur / width);
+
+    const neighbors = [
+      cx > 0 ? cur - 1 : -1,
+      cx < width - 1 ? cur + 1 : -1,
+      cy > 0 ? cur - width : -1,
+      cy < height - 1 ? cur + width : -1,
+    ];
+
+    for (const next of neighbors) {
+      if (next === -1 || visited[next] === 1) continue;
+      const nAlpha = rgbaBuffer[next * 4 + 3];
+      if (nAlpha === 0) continue;
+
+      const nr = rgbaBuffer[next * 4];
+      const ng = rgbaBuffer[next * 4 + 1];
+      const nb = rgbaBuffer[next * 4 + 2];
+
+      if (isMangaPaperPixel(nr, ng, nb, threshold - 25)) {
+        visited[next] = 1;
+        queue.push(next);
+      }
+    }
+  }
+
+  // Knock out visited exterior connected paper pixels & apply color-to-alpha
+  for (let i = 0; i < total; i++) {
     const idx = i * 4;
-    const maskVal = smoothMask[i];
+    const origA = rgbaBuffer[idx + 3];
 
-    if (maskVal === 0) {
+    if (origA === 0) {
       output[idx] = 0;
       output[idx + 1] = 0;
       output[idx + 2] = 0;
@@ -140,48 +235,107 @@ export function refineLayerAlpha(
       continue;
     }
 
-    const r = source[idx];
-    const g = source[idx + 1];
-    const b = source[idx + 2];
-    const a = source[idx + 3];
-    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-
-    // Dark line art (black ink contour) is ALWAYS preserved at full opacity
-    if (luma < 70) {
-      output[idx] = r;
-      output[idx + 1] = g;
-      output[idx + 2] = b;
-      output[idx + 3] = Math.round((a * Math.max(maskVal, 200)) / 255);
+    if (visited[i] === 1) {
+      // Exterior connected paper is 100% transparent
+      output[idx] = 0;
+      output[idx + 1] = 0;
+      output[idx + 2] = 0;
+      output[idx + 3] = 0;
       continue;
     }
 
-    // If light paper background and pixel is near-white (>242) with low color variance,
-    // attenuate alpha proportionally if near mask boundary to avoid rectangular white frames
-    if (
-      isLightBackground &&
-      r > 242 &&
-      g > 242 &&
-      b > 242 &&
-      Math.abs(r - g) < 10 &&
-      Math.abs(g - b) < 10
-    ) {
-      const edgeWeight = maskVal / 255;
-      if (edgeWeight < 0.95) {
+    const r = rgbaBuffer[idx];
+    const g = rgbaBuffer[idx + 1];
+    const b = rgbaBuffer[idx + 2];
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+    // Dark ink line art is preserved at full opacity
+    if (luma <= blackCutoff) {
+      output[idx] = r;
+      output[idx + 1] = g;
+      output[idx + 2] = b;
+      output[idx + 3] = origA;
+      continue;
+    }
+
+    // Interior paper pixels above threshold
+    if (isMangaPaperPixel(r, g, b, threshold)) {
+      output[idx] = 0;
+      output[idx + 1] = 0;
+      output[idx + 2] = 0;
+      output[idx + 3] = 0;
+      continue;
+    }
+
+    // Intermediate antialiased line art transitions
+    if (luma > blackCutoff && luma < threshold && isMangaPaperPixel(r, g, b, blackCutoff)) {
+      const inkFraction = 1 - (luma - blackCutoff) / (threshold - blackCutoff);
+      const newAlpha = Math.round(origA * Math.max(0, Math.min(1, Math.pow(inkFraction, 1.2))));
+      if (newAlpha === 0) {
         output[idx] = 0;
         output[idx + 1] = 0;
         output[idx + 2] = 0;
         output[idx + 3] = 0;
-        continue;
+      } else {
+        const darkFactor = inkFraction;
+        output[idx] = Math.round(r * darkFactor);
+        output[idx + 1] = Math.round(g * darkFactor);
+        output[idx + 2] = Math.round(b * darkFactor);
+        output[idx + 3] = newAlpha;
       }
+      continue;
     }
 
+    // Color artwork elements
     output[idx] = r;
     output[idx + 1] = g;
     output[idx + 2] = b;
-    output[idx + 3] = Math.round((a * maskVal) / 255);
+    output[idx + 3] = origA;
   }
 
   return output;
+}
+
+/**
+ * Refines a character layer's alpha channel to eliminate background paper bleed,
+ * white halos, and hard jagged boundaries.
+ *
+ * For character elements (hair, face, eyes, body, clothing, props):
+ * 1. Preserves dark line art (ink lines where luminance < 75) at 100% opacity.
+ * 2. Knocks out exterior and interior white/off-white background paper to true alpha = 0.
+ * 3. Softens boundary transitions with antialiased feathering and color-to-alpha ink blending.
+ */
+export function refineLayerAlpha(
+  source: Uint8ClampedArray | Uint8Array,
+  mask: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  category: string,
+  featherRadius: number = 1,
+  options: {
+    paperThreshold?: number;
+    autoKnockoutPaper?: boolean;
+  } = {}
+): Uint8ClampedArray {
+  // First apply the mask to source with antialiased feathering
+  const rawMasked = applyMaskToSource(source, mask, width, height, featherRadius);
+
+  // If it's a background environment layer, return the raw masked buffer
+  if (category === 'background') {
+    return rawMasked;
+  }
+
+  // For character parts (hair, face, eyes, body, clothing, props, etc.):
+  // Automatically knock out white/off-white paper background so the layer has genuine transparency
+  const autoKnockout = options.autoKnockoutPaper !== false;
+  if (autoKnockout) {
+    return knockoutPaperBackground(rawMasked, width, height, {
+      paperThreshold: options.paperThreshold ?? 228,
+      blackCutoff: 75,
+    });
+  }
+
+  return rawMasked;
 }
 
 /**

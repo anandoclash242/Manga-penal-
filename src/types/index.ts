@@ -84,6 +84,8 @@ export interface SegmentationSettings {
   enableReconstruction: boolean;
   edgeFeather: number; // 0 to 10px
   maskQuality: 'normal' | 'high' | 'ultra';
+  paperThreshold?: number; // 180 to 255 luminance cutoff for white manga paper, default 228
+  autoKnockoutPaper?: boolean; // Whether to automatically knock out white/off-white paper background to true alpha
 }
 
 export interface Project {

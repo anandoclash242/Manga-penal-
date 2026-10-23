@@ -129,7 +129,11 @@ export async function requestPartReconstruction(
 export async function extractLayersFromPlan(
   sourceImageElement: HTMLImageElement,
   plans: PartSegmentationPlan[],
-  featherRadius: number = 1
+  featherRadius: number = 1,
+  options: {
+    paperThreshold?: number;
+    autoKnockoutPaper?: boolean;
+  } = {}
 ): Promise<Layer[]> {
   const width = sourceImageElement.naturalWidth || sourceImageElement.width;
   const height = sourceImageElement.naturalHeight || sourceImageElement.height;
@@ -176,7 +180,8 @@ export async function extractLayersFromPlan(
       width,
       height,
       plan.category,
-      featherRadius
+      featherRadius,
+      options
     );
 
     // Validate transparency
